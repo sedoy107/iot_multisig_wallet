@@ -4,7 +4,7 @@ pragma solidity ^0.8.4;
 contract Wallet {
     // constants
     uint8 constant public MAX_OWNERS = 255;
-    uint8 constant public MAX_TRANSFERS = 3;
+    uint8 constant public MAX_TRANSFERS = 255;
     
     // enums
     enum TransferState {
@@ -18,13 +18,11 @@ contract Wallet {
     }
     
     // state variables
-    uint id;
     uint public approvalCount;
     uint256 public bitmask = 1; // Can accommodate up to 255 owners
-    uint[] public indexQueue; // Holds available transfers' positions
     address[] private owners_array; // Used to cleanup approvals (not worth it in termas of gas)
-    mapping(address => uint256) public owners; // Used for onlyOwner transferExists(_id) modifier
-    Transfer[MAX_TRANSFERS] public transfers; // Infinitely growing
+    mapping(address => uint256) public owners; // Used for onlyOwner modifier
+    Transfer[] public transfers; // Infinitely growing
     
     // structs
     struct Transfer {
@@ -46,15 +44,16 @@ contract Wallet {
     );
     
     // modifiers
-    modifier onlyOwner () {
+    modifier onlyOwner() {
         require(owners[msg.sender] > 0, "Owner-only operation");
         _;
     }
     
-    modifier withinRange (uint _id) {
-        require(_id < MAX_TRANSFERS, "Out-of-range");
+    modifier transferExists(uint _id) {
+        require(transfers.length > _id, "Transaction doen't exist");
         _;
     }
+    
     // constructor
     constructor(uint _approvalCount, address[] memory _owners) {
         require(_owners.length <= MAX_OWNERS, "Too many owners");
@@ -72,8 +71,6 @@ contract Wallet {
                 bitmask |= 1;
             }
         }
-        
-        id = 0;
     }
 
     //public
@@ -95,37 +92,17 @@ contract Wallet {
         return _addr;
     }
     
-    function getAvailableIndices() public view returns (uint[] memory) {
-        return indexQueue;
-    }
-    
     // Should create a new Transfer object
     // Only owner is allowed to create TransferState
     // Do not create transfers if the wallet balance is lower than the specified amount
-    // gas: 193435 or 186681
+    // gas: ?
     function createTransfer (address payable recepient, uint amount) public onlyOwner returns (uint){
         require(address(this).balance >= amount, "Insufficient balance in Wallet");
-        require(id < MAX_TRANSFERS || indexQueue.length > 0, "Transfer queue is full");
-        
-        // Get free index
-        uint index;
-        if (indexQueue.length > 0) {
-            //gas: 186681
-            // Get index that was freed
-            index = indexQueue[indexQueue.length - 1];
-            indexQueue.pop();
-        }
-        else {
-            // gas: 193435
-            // Write sequentially
-            index = id; 
-            id++; // cannot be more that MAX_TRANSFERS
-        }
         
         // Create a new transfer object
         // approvalCount is set to 1 because the creator is assumed to have approved the transfer he has created
         Transfer memory new_transfer = Transfer(
-            index,
+            0,
             recepient,
             amount,
             block.timestamp,
@@ -133,9 +110,11 @@ contract Wallet {
             TransferState.Pending,
             bitmask ^ owners[msg.sender]
         );
+        
        
         //Register the new transfer
-        transfers[index] = new_transfer;
+        transfers.push(new_transfer);
+        uint index = transfers.length - 1;
         
         processState(index);
         
@@ -145,8 +124,8 @@ contract Wallet {
     // Approves existing transfers which are in Pending state
     // Only owner can approve transfers
     // Each address can approve transation only once
-    // gas: 41279
-    function approveTransfer (uint _id) public onlyOwner withinRange(_id) returns (uint){
+    // gas: 44471
+    function approveTransfer (uint _id) public onlyOwner transferExists(_id) returns (uint){
         require(transfers[_id].state == TransferState.Pending, "Only pending transfer can be approved");
         require(transfers[_id].approvalBitmap & owners[msg.sender] != 0, "This address already approved this transfer");
         
@@ -167,7 +146,7 @@ contract Wallet {
     // Revokes approval from existing transfers which are in Pending state
     // Only owner can revoke transfers
     // Each address can revoke transation only if it has previously approved it
-    function revokeTransfer (uint _id) public onlyOwner withinRange(_id) returns (uint){
+    function revokeTransfer (uint _id) public onlyOwner transferExists(_id) returns (uint){
         require(transfers[_id].state == TransferState.Pending, "Only pending transfer can be revoked");
         require(transfers[_id].approvalBitmap & owners[msg.sender] == 0, "This address didn't approved this transfer");
         
@@ -186,7 +165,7 @@ contract Wallet {
     }
     
     // Execute transfer that is in Ready state
-    function executeTransfer (uint _id) public payable onlyOwner withinRange(_id) returns (uint) {
+    function executeTransfer (uint _id) public payable onlyOwner transferExists(_id) returns (uint) {
         require(
             transfers[_id].state == TransferState.Ready ||
             transfers[_id].state == TransferState.Failed,
@@ -204,7 +183,7 @@ contract Wallet {
     }
     
     // Cancels transfer that is in Failed state
-    function cancelFailedTransfer (uint _id) public onlyOwner returns (uint) {
+    function cancelFailedTransfer (uint _id) public onlyOwner transferExists(_id) returns (uint) {
         require(transfers[_id].state == TransferState.Failed, "Only Failed transfer can be cancelled");
         
         transfers[_id].state == TransferState.Cancelled;
@@ -241,10 +220,9 @@ contract Wallet {
         if (t.state == TransferState.Cancelled || t.state == TransferState.Completed) {
             emit ReportTransferState(_id, t.recepient, t.amount, t.state);
             
-            // with deletion: 53258 for the final approval
-            // w/o deletion: 92449 for the final approval
-            delete transfers[_id];
-            indexQueue.push(_id);
+            // with deletion: 39259 for the final approval
+            // w/o deletion: 54601 for the final approval
+            delete transfers[_id]; 
         }
     }
 }
