@@ -1,20 +1,7 @@
 const Wallet = artifacts.require("Wallet");
 
-const owners = [
-  '0x4878Fc9129C371027C046769663d2316eacDfA24',
-  '0xA05e1DC22f03fe959F827FB87fa57dc3eb9373cA',
-  '0xa8ee3Acc92f5e521F3aF4BeABef146E4a718d97C',
-  '0xAB33152795C1CDA0a7062cB43C9EBf4cff7133b2',
-  '0x18978C86ACf7Bf57e89E3b476D5621f6Aa56C370',
-  '0x001E6DD82a4682f3F53Eeb1f29Ec22488AdD3FaD',
-  '0x1b17b2b04450825b80cCC663e6de6b7E71eBc05d',
-  '0xe6D9Bd059Ad97184c63AA767eC171390fD37E373',
-  '0xb26e8Bd35608E56d6940Ce10678c799B1D90F057',
-  '0xbC7a0551EfB3c505d7De3b673F8939eB836a1B09'
-  ];
-
 const count = 3;
 
-module.exports = function (deployer) {
-  deployer.deploy(Wallet, count, owners);
+module.exports = function (deployer, network, accounts) {
+  deployer.deploy(Wallet, count, accounts.slice(0,count));
 };
